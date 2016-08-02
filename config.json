@@ -1,5 +1,6 @@
 {
-    "url": "http://l24u.com",
+    "url": "http://l24u.ru",
+    "port": "4567",
     "database": "redis",
     "redis": {
         "host": "redis",
