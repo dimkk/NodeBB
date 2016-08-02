@@ -1,0 +1,11 @@
+{
+    "url": "http://l24u.com",
+    "database": "redis",
+    "redis": {
+        "host": "redis",
+        "port": "6379",
+        "username": "",
+        "password": "",
+        "database": "0"
+    }
+}
