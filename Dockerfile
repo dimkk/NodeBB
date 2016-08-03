@@ -8,7 +8,7 @@ ENV NODE_ENV=production \
     silent=false
 
 
-VOLUME ["/usr/src/app"]
+VOLUME /usr/src/app
 
 # nodebb setup will ask you for connection information to a redis (default), mongodb then run the forum
 # nodebb upgrade is not included and might be desired
