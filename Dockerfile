@@ -12,7 +12,7 @@ VOLUME /usr/src/app/cfg
 
 # nodebb setup will ask you for connection information to a redis (default), mongodb then run the forum
 # nodebb upgrade is not included and might be desired
-CMD node app --setup && npm start
+CMD npm start
 
 
 
