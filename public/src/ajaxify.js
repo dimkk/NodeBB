@@ -1,17 +1,16 @@
 "use strict";
+/*global app, bootbox, templates, socket, config, RELATIVE_PATH*/
 
 var ajaxify = ajaxify || {};
 
 $(document).ready(function() {
-
-	/*global app, templates, socket, config, RELATIVE_PATH*/
-
 	var location = document.location || window.location;
 	var rootUrl = location.protocol + '//' + (location.hostname || location.host) + (location.port ? ':' + location.port : '');
 	var apiXHR = null;
 
 	var translator;
 	var retry = true;
+	var previousBodyClass = '';
 
 	// Dumb hack to fool ajaxify into thinking translator is still a global
 	// When ajaxify is migrated to a require.js module, then this can be merged into the "define" call
@@ -67,7 +66,13 @@ $(document).ready(function() {
 
 		url = ajaxify.start(url);
 
-		$('body').removeClass(ajaxify.data.bodyClass);
+		// If any listeners alter url and set it to an empty string, abort the ajaxification
+		if (url === null) {
+			$(window).trigger('action:ajaxify.end', {url: url, tpl_url: ajaxify.data.template.name, title: ajaxify.data.title});
+			return false;
+		}
+
+		previousBodyClass = ajaxify.data.bodyClass;
 		$('#footer, #content').removeClass('hide').addClass('ajaxifying');
 
 		ajaxify.loadData(url, function(err, data) {
@@ -108,9 +113,13 @@ $(document).ready(function() {
 	ajaxify.start = function(url) {
 		url = ajaxify.removeRelativePath(url.replace(/^\/|\/$/g, ''));
 
-		$(window).trigger('action:ajaxify.start', {url: url});
+		var payload = {
+			url: url
+		}
 
-		return url;
+		$(window).trigger('action:ajaxify.start', payload);
+
+		return payload.url;
 	};
 
 	ajaxify.updateHistory = function(url, quiet) {
@@ -165,7 +174,7 @@ $(document).ready(function() {
 		templates.parse(tpl_url, data, function(template) {
 			translator.translate(template, function(translatedTemplate) {
 				translatedTemplate = translator.unescape(translatedTemplate);
-				$('body').addClass(data.bodyClass);
+				$('body').removeClass(previousBodyClass).addClass(data.bodyClass);
 				$('#content').html(translatedTemplate);
 
 				ajaxify.end(url, tpl_url);
@@ -189,8 +198,6 @@ $(document).ready(function() {
 		}
 		var count = 2;
 
-		ajaxify.variables.parse();
-
 		ajaxify.loadScript(tpl_url, done);
 
 		ajaxify.widgets.render(tpl_url, url, done);
@@ -200,6 +207,14 @@ $(document).ready(function() {
 		app.processPage();
 	};
 
+	ajaxify.parseData = function() {
+		var dataEl = $('#ajaxify-data');
+		if (dataEl.length) {
+			ajaxify.data = JSON.parse(dataEl.text());
+			dataEl.remove();
+		}
+	};
+
 	ajaxify.removeRelativePath = function(url) {
 		if (url.startsWith(RELATIVE_PATH.slice(1))) {
 			url = url.slice(RELATIVE_PATH.length);
@@ -207,11 +222,7 @@ $(document).ready(function() {
 		return url;
 	};
 
-	ajaxify.refresh = function(e, callback) {
-		if (e && e instanceof jQuery.Event) {
-			e.preventDefault();
-		}
-
+	ajaxify.refresh = function(callback) {
 		ajaxify.go(ajaxify.currentPage + window.location.search + window.location.hash, callback, true);
 	};
 
@@ -293,15 +304,41 @@ $(document).ready(function() {
 			return href === undefined || href === '' || href === 'javascript:;';
 		}
 
+		var contentEl = document.getElementById('content');
+
 		// Enhancing all anchors to ajaxify...
 		$(document.body).on('click', 'a', function (e) {
+			var _self = this;
+			var process = function() {
+				if (!e.ctrlKey && !e.shiftKey && !e.metaKey && e.which === 1) {
+					if (internalLink) {
+						var pathname = this.href.replace(rootUrl + RELATIVE_PATH + '/', '');
+
+						// Special handling for urls with hashes
+						if (window.location.pathname === this.pathname && this.hash.length) {
+							window.location.hash = this.hash;
+						} else {
+							if (ajaxify.go(pathname)) {
+								e.preventDefault();
+							}
+						}
+					} else if (window.location.pathname !== '/outgoing') {
+						if (config.openOutgoingLinksInNewTab && $.contains(contentEl, this)) {
+							window.open(this.href, '_blank');
+							e.preventDefault();
+						} else if (config.useOutgoingLinksPage) {
+							ajaxify.go('outgoing?url=' + encodeURIComponent(this.href));
+							e.preventDefault();
+						}
+					}
+				}
+			};
+
 			if (this.target !== '' || (this.protocol !== 'http:' && this.protocol !== 'https:')) {
 				return;
 			}
 
-			var internalLink = this.host === '' ||	// Relative paths are always internal links
-				(this.host === window.location.host && this.protocol === window.location.protocol &&	// Otherwise need to check if protocol and host match
-				(RELATIVE_PATH.length > 0 ? this.pathname.indexOf(RELATIVE_PATH) === 0 : true));	// Subfolder installs need this additional check
+			var internalLink = utils.isInternalURI(this, window.location, RELATIVE_PATH);
 
 			if ($(this).attr('data-ajaxify') === 'false') {
 				if (!internalLink) {
@@ -311,6 +348,7 @@ $(document).ready(function() {
 				}
 			}
 
+			// Default behaviour for rss feeds
 			if (internalLink && $(this).attr('href').endsWith('.rss')) {
 				return;
 			}
@@ -319,28 +357,19 @@ $(document).ready(function() {
 				return e.preventDefault();
 			}
 
-			if (!e.ctrlKey && !e.shiftKey && !e.metaKey && e.which === 1) {
-				if (internalLink) {
-					var pathname = this.href.replace(rootUrl + RELATIVE_PATH + '/', '');
-
-					// Special handling for urls with hashes
-					if (window.location.pathname === this.pathname && this.hash.length) {
-						window.location.hash = this.hash;
-					} else {
-						if (ajaxify.go(pathname)) {
-							e.preventDefault();
+			if (app.flags && app.flags.hasOwnProperty('_unsaved') && app.flags._unsaved === true) {
+				translator.translate('[[global:unsaved-changes]]', function(text) {
+					bootbox.confirm(text, function(navigate) {
+						if (navigate) {
+							app.flags._unsaved = false;
+							process.call(_self);
 						}
-					}
-				} else if (window.location.pathname !== '/outgoing') {
-					if (config.openOutgoingLinksInNewTab) {
-						window.open(this.href, '_blank');
-						e.preventDefault();
-					} else if (config.useOutgoingLinksPage) {
-						ajaxify.go('outgoing?url=' + encodeURIComponent(this.href));
-						e.preventDefault();
-					}
-				}
+					});
+				});
+				return e.preventDefault();
 			}
+
+			process.call(_self);
 		});
 	}
 
@@ -353,8 +382,9 @@ $(document).ready(function() {
 
 	app.load();
 
-	$('[data-template]').each(function() {
-		templates.cache[$(this).attr('data-template')] = $(this).html();
+	$('[type="text/tpl"][data-template]').each(function() {
+		templates.cache[$(this).attr('data-template')] = $('<div/>').html($(this).html()).text();
+		$(this).parent().remove();
 	});
 
 });

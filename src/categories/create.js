@@ -3,9 +3,9 @@
 var async = require('async');
 
 var db = require('../database');
-var privileges = require('../privileges');
 var groups = require('../groups');
 var plugins = require('../plugins');
+var privileges = require('../privileges');
 var utils = require('../../public/src/utils');
 
 module.exports = function(Categories) {
@@ -28,6 +28,7 @@ module.exports = function(Categories) {
 					cid: cid,
 					name: data.name,
 					description: data.description ? data.description : '',
+					descriptionParsed: data.descriptionParsed ? data.descriptionParsed : '',
 					icon: data.icon ? data.icon : '',
 					bgColor: data.bgColor || colours[0],
 					color: data.color || colours[1],
@@ -48,11 +49,16 @@ module.exports = function(Categories) {
 			function(data, next) {
 				category = data.category;
 
-				var defaultPrivileges = ['find', 'read', 'topics:read', 'topics:create', 'topics:reply', 'upload:post:image'];
+				var defaultPrivileges = ['find', 'read', 'topics:read', 'topics:create', 'topics:reply', 'posts:edit', 'posts:delete', 'topics:delete', 'upload:post:image'];
 
 				async.series([
 					async.apply(db.setObject, 'category:' + category.cid, category),
-					async.apply(Categories.parseDescription, category.cid, category.description),
+					function (next) {
+						if (category.descriptionParsed) {
+							return next();
+						}
+						Categories.parseDescription(category.cid, category.description, next);
+					},
 					async.apply(db.sortedSetAdd, 'categories:cid', category.order, category.cid),
 					async.apply(db.sortedSetAdd, 'cid:' + parentCid + ':children', category.order, category.cid),
 					async.apply(privileges.categories.give, defaultPrivileges, category.cid, 'administrators'),

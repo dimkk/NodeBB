@@ -3,6 +3,7 @@
 
 var async = require('async');
 var querystring = require('querystring');
+var validator = require('validator');
 
 var categories = require('../categories');
 var privileges = require('../privileges');
@@ -85,7 +86,7 @@ unreadController.get = function(req, res, next) {
 			return filter && filter.selected;
 		})[0];
 
-		data.querystring = req.query.cid ? ('?cid=' + req.query.cid) : '';
+		data.querystring = cid ? ('?cid=' + validator.escape(String(cid))) : '';
 
 		res.render('unread', data);
 	});
@@ -100,12 +101,13 @@ function getWatchedCategories(uid, selectedCid, callback) {
 			privileges.categories.filterCids('read', cids, uid, next);
 		},
 		function (cids, next) {
-			categories.getCategoriesFields(cids, ['cid', 'name', 'slug', 'icon', 'link', 'color', 'bgColor'], next);
+			categories.getCategoriesFields(cids, ['cid', 'name', 'slug', 'icon', 'link', 'color', 'bgColor', 'parentCid'], next);
 		},
 		function (categoryData, next) {
 			categoryData = categoryData.filter(function(category) {
 				return category && !category.link;
 			});
+
 			var selectedCategory;
 			categoryData.forEach(function(category) {
 				category.selected = parseInt(category.cid, 10) === parseInt(selectedCid, 10);
@@ -113,11 +115,27 @@ function getWatchedCategories(uid, selectedCid, callback) {
 					selectedCategory = category;
 				}
 			});
-			next(null, {categories: categoryData, selectedCategory: selectedCategory});
+
+			var categoriesData = [];
+			var tree = categories.getTree(categoryData, 0);
+
+			tree.forEach(function(category) {
+				recursive(category, categoriesData, '');
+			});
+
+			next(null, {categories: categoriesData, selectedCategory: selectedCategory});
 		}
 	], callback);
 }
 
+function recursive(category, categoriesData, level) {
+	category.level = level;
+	categoriesData.push(category);
+
+	category.children.forEach(function(child) {
+		recursive(child, categoriesData, '&nbsp;&nbsp;&nbsp;&nbsp;' + level);
+	});
+}
 
 unreadController.unreadTotal = function(req, res, next) {
 	var filter = req.params.filter || '';

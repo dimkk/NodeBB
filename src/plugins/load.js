@@ -153,22 +153,22 @@ module.exports = function(Plugins) {
 			}
 
 			Plugins.clientScripts = Plugins.clientScripts.concat(pluginData.scripts.map(function(file) {
-				return path.join(__dirname, '../../node_modules/', pluginData.id, file);
-			}));
+				return resolveModulePath(path.join(__dirname, '../../node_modules/', pluginData.id, file), file);
+			})).filter(Boolean);
 		}
 
 		if (Array.isArray(pluginData.acpScripts)) {
 			if (global.env === 'development') {
-				winston.verbose('[plugins] Found ' + pluginData.acpScripts.length + ' js file(s) for plugin ' + pluginData.id);
+				winston.verbose('[plugins] Found ' + pluginData.acpScripts.length + ' ACP js file(s) for plugin ' + pluginData.id);
 			}
 
 			Plugins.acpScripts = Plugins.acpScripts.concat(pluginData.acpScripts.map(function(file) {
-				return path.join(__dirname, '../../node_modules/', pluginData.id, file);
-			}));
+				return resolveModulePath(path.join(__dirname, '../../node_modules/', pluginData.id, file), file);
+			})).filter(Boolean);
 		}
 
 		callback();
-	};
+	}
 
 	function mapClientModules(pluginData, callback) {
 		if (!pluginData.hasOwnProperty('modules')) {
@@ -201,14 +201,16 @@ module.exports = function(Plugins) {
 			}
 
 			for (var name in pluginData.modules) {
-				modules[name] = path.join('./node_modules/', pluginData.id, pluginData.modules[name]);
+				if (pluginData.modules.hasOwnProperty(name)) {
+					modules[name] = path.join('./node_modules/', pluginData.id, pluginData.modules[name]);
+				}
 			}
 
 			meta.js.scripts.modules = _.extend(meta.js.scripts.modules, modules);
 		}
 
 		callback();
-	};
+	}
 
 	function loadLanguages(pluginData, callback) {
 		if (typeof pluginData.languages !== 'string') {
@@ -219,6 +221,10 @@ module.exports = function(Plugins) {
 			fallbackMap = {};
 
 		utils.walk(pathToFolder, function(err, languages) {
+			if (err) {
+				return callback(err);
+			}
+
 			async.each(languages, function(pathToLang, next) {
 				fs.readFile(pathToLang, function(err, file) {
 					if (err) {
@@ -247,7 +253,6 @@ module.exports = function(Plugins) {
 						}).filter(Boolean).forEach(function(key) {
 							Plugins.customLanguages[key] = _.defaults(Plugins.customLanguages[key] || {}, data);
 						});
-						fallbackMap[path.basename(pathToLang, '.json')] = path.join(pathToFolder, pluginData.defaultLang, path.basename(pathToLang));
 					}
 
 					next();
@@ -257,12 +262,34 @@ module.exports = function(Plugins) {
 					return callback(err);
 				}
 
-				// do I need this either?
-				_.extendOwn(Plugins.customLanguageFallbacks, fallbackMap);
-
 				callback();
 			});
 		});
+	}
+
+	function resolveModulePath(fullPath, relPath) {
+		/**
+		  * With npm@3, dependencies can become flattened, and appear at the root level.
+		  * This method resolves these differences if it can.
+		  */
+		var matches = fullPath.match(/node_modules/g);
+		var atRootLevel = !matches || matches.length === 1;
+
+		try {
+			fs.statSync(fullPath);
+			winston.verbose('[plugins/load] File found: ' + fullPath);
+			return fullPath;
+		} catch (e) {
+			// File not visible to the calling process, ascend to root level if possible and try again
+			if (!atRootLevel && relPath) {
+				winston.verbose('[plugins/load] File not found: ' + fullPath + ' (Ascending)');
+				return resolveModulePath(path.join(__dirname, '../..', relPath));
+			} else {
+				// Already at root level, file was simply not found
+				winston.warn('[plugins/load] File not found: ' + fullPath + ' (Ignoring)');
+				return null;
+			}
+		}
 	}
 
 	Plugins.loadPluginInfo = function(pluginPath, callback) {

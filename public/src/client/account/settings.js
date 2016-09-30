@@ -2,7 +2,7 @@
 
 /*global define, socket, app, ajaxify, config*/
 
-define('forum/account/settings', ['forum/account/header', 'components'], function(header, components) {
+define('forum/account/settings', ['forum/account/header', 'components', 'sounds'], function(header, components, sounds) {
 	var	AccountSettings = {};
 
 	AccountSettings.init = function() {
@@ -32,6 +32,13 @@ define('forum/account/settings', ['forum/account/header', 'components'], functio
 		});
 
 		$('[data-property="homePageRoute"]').on('change', toggleCustomRoute);
+
+		$('.account').find('button[data-action="play"]').on('click', function(e) {
+			e.preventDefault();
+
+			var	fileName = $(this).parent().parent().find('select').val();
+			sounds.playFile(fileName);
+		});
 
 		toggleCustomRoute();
 
@@ -77,9 +84,13 @@ define('forum/account/settings', ['forum/account/header', 'components'], functio
 					if (key === 'userLang' && config.userLang !== newSettings.userLang) {
 						requireReload = true;
 					}
-					config[key] = newSettings[key];
+					if (config.hasOwnProperty(key)) {
+						config[key] = newSettings[key];
+					}
 				}
 			}
+
+			sounds.reloadMapping();
 
 			if (requireReload && parseInt(app.user.uid, 10) === parseInt(ajaxify.data.theirid, 10)) {
 				app.alert({
@@ -113,7 +124,7 @@ define('forum/account/settings', ['forum/account/header', 'components'], functio
 				// This is done via DELETE because a user shouldn't be able to
 				// revoke his own session! This is what logout is for
 				$.ajax({
-					url: config.relative_path + '/user/' + ajaxify.data.userslug + '/session/' + uuid,
+					url: config.relative_path + '/api/user/' + ajaxify.data.userslug + '/session/' + uuid,
 					method: 'delete',
 					headers: {
 						'x-csrf-token': config.csrf_token
@@ -121,7 +132,15 @@ define('forum/account/settings', ['forum/account/header', 'components'], functio
 				}).done(function() {
 					parentEl.remove();
 				}).fail(function(err) {
-					app.alertError(err.responseText);
+					try {
+						var errorObj = JSON.parse(err.responseText);
+						if (errorObj.loggedIn === false) {
+							window.location.href = config.relative_path + '/login?error=' + errorObj.title;
+						}
+						app.alertError(errorObj.title);
+					} catch (e) {
+						app.alertError('[[error:invalid-data]]');
+					}
 				});
 			}
 		});
